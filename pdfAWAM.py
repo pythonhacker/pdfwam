@@ -75,23 +75,23 @@ def extractAWAMIndicators(pdf,
         pdfobj.verbose = verbose
         
         # pdfobj.read()
-        pdfobj.fixIndirectObjectXref()
+        pdfobj.fix_indirect_object_xref()
 
         # If developer, just print a dictionary containing
         # meta info, scanned, forms, tagged, permissions
         # and an accessibility score.
         if developer:
-            pdfobj.initAWAM()
-            pdfobj.processAWAM()            
+            pdfobj.init()
+            pdfobj.process_awam()            
             devdict = { 'title': pdfobj.title,
                         'creator': pdfobj.creator,
                         'producer': pdfobj.producer,
                         'author': pdfobj.author,
                         'subject': pdfobj.subject,
                         'created': pdfobj.ctime,
-                        'scanned': pdfobj.isScanned,
-                        'tagged': (pdfobj.structTree != None),
-                        'form': pdfobj.hasValidForms(),
+                        'scanned': pdfobj.is_scanned,
+                        'tagged': (pdfobj.struct_tree != None),
+                        'form': pdfobj.has_valid_forms(),
                         'permissions': pdfobj.awamHandler.resultMap['EIAO.A.10.8.1.4.PDF.1.1'].get((0,1),0),
                         'lang': pdfobj.awamHandler.resultMap.get('EIAO.A.0.0.0.0.4.PDF.4.1',''),
                         'numpages': len(pdfobj.pages)
@@ -113,12 +113,11 @@ def extractAWAMIndicators(pdf,
             else:
                 print('Title: (None)')
 
-            print('Has structure tree:',(pdfobj.structTree != None))
-            has_forms = pdfobj.hasForms()
-            print('Has forms:',has_forms)
-            print('Has bookmarks:',pdfobj.hasBookmarks())
-            print('Scanned:',pdfobj.isScanned)
-            print('Num Images:',pdfobj.getNumImages())
+            print('Has structure tree:',(pdfobj.struct_tree != None))
+            print('Has forms:', pdfobj.has_forms())
+            print('Has bookmarks:',pdfobj.has_bookmarks())
+            print('Scanned:',pdfobj.is_scanned)
+            print('Num Images:',pdfobj.get_num_images())
 
             print('***PDF Summary: End ****\n')
 

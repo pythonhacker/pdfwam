@@ -61,8 +61,6 @@ class PdfStructureMixin(object):
         self.author = ''
         self.subject = ''
         self.title = ''
-        # AWAM handler
-        self.awamHandler = None
         # Root object
         self.root = None
         # Numbers tree
@@ -93,11 +91,6 @@ class PdfStructureMixin(object):
         self.verbose = True
         # Logger
         self.logger = logging.getLogger('pdfwam')
-
-    def setLogger(self, logger):
-        """ Set the logging object """
-
-        self.logger = logger
 
     def read(self, stream):
         """ Read the PDF file """
@@ -140,7 +133,7 @@ class PdfStructureMixin(object):
                     self.logger.error('Error getting object from IndirectObject for property',field,'...')
                     self.logger.error('\tError is',e)
 
-    def makeNumsTree(self):
+    def build_numbers_tree(self):
         """ Make numbers dictionary from structure tree """
 
         self.numstree = {}
@@ -162,7 +155,7 @@ class PdfStructureMixin(object):
 
             self.logger.error("Error: couldn't get structure tree!")
             # The previous KeyError with wrong structure tree
-            # becomes a valueerror aftere fixIndirectObjectXref is
+            # becomes a valueerror after fixIndirectObjectXref is
             # called (for one test PDF), so catch it.
             return
         except Exception as e:
@@ -244,13 +237,13 @@ class PdfStructureMixin(object):
         # Creator MWAM
         self.awamHandler.resultMap['EGOVMON.PDF.PROP.07'] = {(0, 1): items[6].decode()}
 
-    def initAWAM(self):
+    def init(self):
         """ Initialize objects required for processing """
 
         self.logger.info("Initializing AWAM")
 
         # Make the nums tree
-        self.makeNumsTree()
+        self.build_numbers_tree()
 
         try:
             roleMap=self.structroot['/RoleMap'].get_object()
@@ -260,23 +253,24 @@ class PdfStructureMixin(object):
             roleMap=None
 
         # Fill in the meta AWAM ids
+        # awamHandler is the object
         self.awamHandler=PdfAWAMHandler(roleMap=roleMap,debug=0,
                                         validateImages=int(config.pdfwamvalidateimgs),
                                         ignoreSingleBitImgs=int(config.pdfwamignoresinglebitimgs))
-        # NOTE: Binding a function named 'awamHandler', not an object!
-        self.awam_handler=self.awamHandler.awamHandler
+        # awam_handler is the function!
+        self.awam_handler=self.awamHandler.handler
 
         # Initialize all AWAM IDs
         for awamid in list(self.awamids.values()):
             self.awamHandler.resultMap[awamid] = {(0,1): 0}
 
-    def setAwamID(self, name, value=1, page=0):
+    def set_awam_id(self, name, value=1, page=0):
         """ Set the value for the AWAM ID matching the given test """
 
         self.awamHandler.resultMap[self.awamids.get(name)] = {(page,1): value}
         self.memo[name] = value
 
-    def processAWAM(self):
+    def process_awam(self):
         """ Fill the AWAM dictionary with information for each
         supported WAM identifier, including the structure tree """
 
@@ -285,22 +279,22 @@ class PdfStructureMixin(object):
         # Some AWAMs are processed right here. These are,
 
         # Title AWAM - WCAG.PDF.18
-        self.setAwamID('wcag.pdf.18', int(len(self.title)>0))
+        self.set_awam_id('wcag.pdf.18', int(len(self.title)>0))
         # Lang AWAM - WCAG.PDF.16
         # Some documents define language in the root object as '/Lang' attribute
         try:
             lang = self.root['/Lang']
-            self.setAwamID('wcag.pdf.16', 1)
+            self.set_awam_id('wcag.pdf.16', 1)
             self.awamHandler.resultMap['EIAO.A.0.0.0.0.4.PDF.4.1'] = lang
             # Set langcheck flag
             self.awamHandler.langcheck = True
         except:
-            self.setAwamID('wcag.pdf.16', 0)
+            self.set_awam_id('wcag.pdf.16', 0)
 
         # Encryption AWAM -> EGOVMON.PDF.05
         encrypted = '/Encrypt' in self.trailer
         if not encrypted:
-            self.setAwamID('egovmon.pdf.05', 1)
+            self.set_awam_id('egovmon.pdf.05', 1)
         else:
             # Get encrytption dictionary
             encd = self.trailer['/Encrypt']
@@ -310,22 +304,22 @@ class PdfStructureMixin(object):
             bit5, bit10 = int(permissions[-5]), int(permissions[-10])
             # For revision 2, we check only bit5
             if revision==2:
-                self.setAwamID('egovmon.pdf.05', bit5)
+                self.set_awam_id('egovmon.pdf.05', bit5)
             # For revision>=3,we do an OR
             elif revision>=3:
-                self.setAwamID('egovmon.pdf.05', bit5|bit10)
+                self.set_awam_id('egovmon.pdf.05', bit5|bit10)
 
         # Scanned PDF AWAM -> EGOVMON.PDF.08
-        self.setAwamID('egovmon.pdf.08', int(not self.getIsScanned()))
+        self.set_awam_id('egovmon.pdf.08', int(not self.get_is_scanned()))
 
         # Consistent headers AWAM -> WCAG.PDF.09
         if (self.structroot != None) and (len(self.structroot) > 0):
-            flag = self.documentHeadersConsistent()
+            flag = self.document_headers_consistent()
             if flag:
-                self.setAwamID('wcag.pdf.09', 1)
+                self.set_awam_id('wcag.pdf.09', 1)
             else:
                 # Adding page number where this failed
-                self.setAwamID('wcag.pdf.09', 0, self.page)
+                self.set_awam_id('wcag.pdf.09', 0, self.page)
         else:
             # We need to remove the entry from results since
             # we pre-initialize everything now
@@ -333,17 +327,17 @@ class PdfStructureMixin(object):
             self.logger.info('Document header check not applicable because struct-tree is absent')
 
         # Bookmarks AWAM -> WCAG.PDF.02
-        self.setAwamID('wcag.pdf.02', int(self.hasBookmarks()))
+        self.set_awam_id('wcag.pdf.02', int(self.has_bookmarks()))
 
         # Structure tags AWAM -> EGOVMON.PDF.03
         if self.structroot==None:
-            self.setAwamID('egovmon.pdf.03', 0)
+            self.set_awam_id('egovmon.pdf.03', 0)
             return
         else:
             # For the time being, we are setting this entry to pass even
             # if the structure tree root object cannot be accessed by pyPdf
             # (example: for the document tests/fw208_accessible.pdf)
-            self.setAwamID('egovmon.pdf.03', 1)
+            self.set_awam_id('egovmon.pdf.03', 1)
 
         # If structroot is None or empty return
         if (self.structroot==None) or (len(self.structroot)==0):
@@ -459,7 +453,7 @@ class PdfStructureMixin(object):
 
         return
 
-    def fixIndirectObjectXref(self):
+    def fix_indirect_object_xref(self):
         """ Fix indirect cross object references """
 
         self.logger.info("Fixing indirect object X references")
@@ -500,7 +494,7 @@ class PdfStructureMixin(object):
             xref[gen][idnum] = ref
             del idref[idnum]
 
-    def _contentStream(self, pgnum):
+    def content_stream(self, pgnum):
         """ Given a page number, return its content stream """
 
         p = self.pages[pgnum]
@@ -514,7 +508,7 @@ class PdfStructureMixin(object):
 
         return content
 
-    def documentHeadersConsistent(self):
+    def document_headers_consistent(self):
         """ Return whether the document uses headers consistently.
         This returns True if document has no headers at all """
 
@@ -609,7 +603,7 @@ class PdfStructureMixin(object):
 
         return True
 
-    def hasBookmarks(self):
+    def has_bookmarks(self):
         """ Return whether the PDF document has bookmarks """
 
         try:
@@ -634,7 +628,7 @@ class PdfStructureMixin(object):
             print('Unexpected error in checking bookmarks=>', e)
             return False
         
-    def _hasColumns(self, pgnum):
+    def _has_columns(self, pgnum):
         """ Return whether a given page has text in more than
         one column """
 
@@ -658,7 +652,7 @@ class PdfStructureMixin(object):
             # Don't bother with pages containing no text
             return False
 
-        conts = self._contentStream(pgnum)
+        conts = self.content_stream(pgnum)
         if conts != None:
             # If operand is a 6 member integer list it indicates
             # the pixel/dimension extents of the box in which the
@@ -708,13 +702,13 @@ class PdfStructureMixin(object):
 
         return False
 
-    def documentHasColumns(self):
+    def document_has_columns(self):
         """ Find out if the document has multiple columns """
 
         # Check all pages
         pgs = []
         for pgnum in range(0, len(self.pages)):
-            if self._hasColumns(pgnum):
+            if self._has_columns(pgnum):
                 pgs.append(str(pgnum+1))
 
         if len(pgs):
@@ -723,7 +717,7 @@ class PdfStructureMixin(object):
 
         return False
 
-    def _hasMultiMedia(self, pgnum):
+    def _has_multimedia(self, pgnum):
         """ Find out if a given page has embedded or
         linked multi-media (video/audio) content """
 
@@ -747,7 +741,7 @@ class PdfStructureMixin(object):
 
         return False
 
-    def _hasEmbeddedMultiMedia(self, pgnum):
+    def _has_embedded_multimedia(self, pgnum):
         """ Find out if a given page has embedded multimedia """
 
         pg = self.pages[pgnum]
@@ -778,7 +772,7 @@ class PdfStructureMixin(object):
 
         return False
 
-    def fetchExternalLinks(self):
+    def get_external_links(self):
         """ Retrieve all '/Link' objects of the
         PDF document as a generator """
 
@@ -796,7 +790,7 @@ class PdfStructureMixin(object):
                 if anot['/Subtype'] in ('/Link') or '/URI' in anot:
                     yield (anot, pg)
 
-    def _hasExternalLinks(self, pgnum):
+    def _has_external_links(self, pgnum):
         """ Return whether the page has external links
         (URIs, URLs, email addresses) etc """
 
@@ -824,37 +818,37 @@ class PdfStructureMixin(object):
 
         return False
 
-    def hasExternalLinks(self):
+    def has_external_links(self):
         """ Find out if the PDF document contains links (URIs)
         to external objects """
 
         for pgnum in range(0, len(self.pages)):
-            if self._hasExternalLinks(pgnum):
+            if self._has_external_links(pgnum):
                 return True
 
         return False
 
-    def hasMultiMedia(self):
+    def has_multimedia(self):
         """ Find out if the PDF document contains or refers
         to multimedia """
 
         for pgnum in range(0, len(self.pages)):
-            if self._hasMultiMedia(pgnum):
+            if self._has_multimedia(pgnum):
                 return True
 
         return False
 
-    def hasEmbeddedMultiMedia(self):
+    def has_embedded_multimedia(self):
         """ Find out if the PDF document contains an
         embedded multimedia file or attachment """
 
         for pgnum in range(0, len(self.pages)):
-            if self._hasEmbeddedMultiMedia(pgnum):
+            if self._has_embedded_multimedia(pgnum):
                 return True
 
         return False
 
-    def getIsTagged(self):
+    def get_is_tagged(self):
         """ Find out whether the PDF document has tag
         marks or not """
 
@@ -867,34 +861,34 @@ class PdfStructureMixin(object):
 
         return False
 
-    def hasFont(self):
+    def has_font(self):
         """ Returns if the document resources structure
         has a '/Font' key """
 
         try:
-            res0 = self.getResourceTree()
+            res0 = self.get_resource_tree()
             x = res0['/Font']
             return True
         except KeyError:
             return False
 
-    def hasForms(self):
+    def has_forms(self):
         """ Return whether the PDF document has an interactive
         form """
  
         return '/AcroForm' in self.root
 
-    def hasValidForms(self):
+    def has_valid_forms(self):
         """ Return whether the PDF document has a valid form object """
 
         try:
             form = self.root['/AcroForm']
             # Contains at least 1 field
-            return (self.getNumFormFields(form)>0)
+            return (self.get_num_formfields(form)>0)
         except KeyError:
             return False
 
-    def getNumFormFields(self, form):
+    def get_num_formfields(self, form):
         """ Return number of fields in the given form object """
 
         try:
@@ -913,7 +907,7 @@ class PdfStructureMixin(object):
 
         return num_fields
 
-    def fetchFormFields(self, form):
+    def fetch_form_fields(self, form):
         """ Returns an iterator (generator) over
         all the elements of the given form object """
 
@@ -927,10 +921,10 @@ class PdfStructureMixin(object):
         # two for loops - one outer and one in the
         # recursive generator as well!
         for f in fields:
-            for item in self._fetchFormFields(f):
+            for item in self._fetch_form_fields(f):
                 yield item
 
-    def _fetchFormFields(self, f):
+    def _fetch_form_fields(self, f):
 
         field = f.get_object()
         # First yield field itself
@@ -941,13 +935,13 @@ class PdfStructureMixin(object):
             kids = field['/Kids']
             for k in kids:
                 kid = k.get_object()
-                for item in self._fetchFormFields(k):
+                for item in self._fetch_form_fields(k):
                     yield item
 
         except KeyError:
             pass
 
-    def hasTextInputForm(self):
+    def has_text_input_form(self):
         """ Return whether the PDF document contains a form
         object with text input fields """
 
@@ -980,8 +974,7 @@ class PdfStructureMixin(object):
 
         return False
 
-
-    def hasEmbeddedFonts(self):
+    def has_embedded_fonts(self):
         """ Return whether the document has any embedded fonts """
 
         fonts = self.font
@@ -1013,7 +1006,7 @@ class PdfStructureMixin(object):
 
         return False
 
-    def getEmbeddedFonts(self):
+    def get_embedded_fonts(self):
         """ Return a list of embedded font objects in the PDF document """
 
         fonts = self.font
@@ -1042,7 +1035,7 @@ class PdfStructureMixin(object):
 
         return embedded
 
-    def getFormObject(self):
+    def get_form_object(self):
         """ Return the form object embedded in the document, if any """
 
         try:
@@ -1052,34 +1045,32 @@ class PdfStructureMixin(object):
         except ValueError as e:
             print('Unexpected error when fetching /AcroForm =>',e)
 
-    def getFontResource(self, pgnum=0):
+    def get_font_resource(self, pgnum=0):
         """ Return the /Font resource """
 
         try:
-            res0 = self.getResourceTree()
+            res0 = self.get_resource_tree()
             return res0['/Font']
         except:
             pass
 
-    def pagesLabels(self):
-
+    def get_page_labels(self):
+        """ Return page labels dictionary """
+        
         try:
             return self.root['/PageLabels']
         except:
             pass
 
-    def getStructureTree(self):
-
+    def get_structure_tree(self):
+        """ Return root of structure tree """
+        
         try:
             return self.root['/StructTreeRoot']
-        except KeyError:
-            pass
-        except ValueError:
-            pass
-        except AssertionError:
+        except (KeyError, ValueError, AssertionError) as e:
             pass
 
-    def getResourceTree(self, pgnum=0):
+    def get_resource_tree(self, pgnum=0):
         """ Returns the resource tree """
 
         try:
@@ -1088,7 +1079,7 @@ class PdfStructureMixin(object):
         except Exception as e:
             self.logger.error("Error getting resource tree", e)
 
-    def resourceIterator(self):
+    def resource_iterator(self):
         """ Return an iterator on all unique resource trees """
 
         # This is an odd-way of creating an iterator
@@ -1096,7 +1087,7 @@ class PdfStructureMixin(object):
         all_res = []
 
         for x in range(len(self.pages)):
-            res = self.getResourceTree(x)
+            res = self.get_resource_tree(x)
             try:
                 all_res.index(res)
             except ValueError:
@@ -1104,7 +1095,7 @@ class PdfStructureMixin(object):
 
         return all_res
 
-    def getIsScanned(self):
+    def get_is_scanned(self):
         """ Returns whether the PDF is a scanned document,
         by inspecting the resource structure """
 
@@ -1127,24 +1118,23 @@ class PdfStructureMixin(object):
         # Check for upto 3 pages
         pgnum = len(self.pages)
         if pgnum==1:
-            return self._getIsScanned()
+            return self._get_is_scanned()
         elif pgnum==2:
             # Check pages 1 & 2
-            return self._getIsScanned() and self._getIsScanned(1)
+            return self._get_is_scanned() and self._get_is_scanned(1)
         elif pgnum>2:
             # Check 1st page and 2 random pages
             pg1 = random.randrange(0, pgnum)
             pg2 = random.randrange(0, pgnum)
-            return self._getIsScanned() and \
-                   self._getIsScanned(pg1) and \
-                   self._getIsScanned(pg2)
+            return self._get_is_scanned() and \
+                   self._get_is_scanned(pg1) and \
+                   self._get_is_scanned(pg2)
 
-    def _getIsScanned(self, pgnum=0):
-        """ Return whether document is scanned w.r.t the given
-        page """
+    def _get_is_scanned(self, pgnum=0):
+        """ Return whether document is scanned w.r.t the given page """
 
         # Check presence of '/Font' resource
-        res = self.getResourceTree(pgnum)
+        res = self.get_resource_tree(pgnum)
         font= '/Font' in res
         # Make sure the font resource is not empty
         if font:
@@ -1172,7 +1162,7 @@ class PdfStructureMixin(object):
         # Flag as scanned if font is missing and has at least 1 image
         return (not font) and img
 
-    def imageIterator(self):
+    def image_iterator(self):
         """ An iterator over the images in the current PDF object """
 
         allimgs = []
@@ -1203,22 +1193,23 @@ class PdfStructureMixin(object):
                             count += 1
                             yield item
 
-    def getNumImages(self):
+    def get_num_images(self):
         """ Return number of images in the PDF file """
 
         count = 0
-        for x in self.imageIterator():
+        for x in self.image_iterator():
             count += 1
 
         return count
 
-    def getNumArtifactImgs(self):
+    def get_num_artifact_imags(self):
+        """ Return number of images which are artifacts """
         return self.nArtifactImgs
 
-    def getNumTables(self):
+    def get_num_tables(self):
         return len(self.awamHandler.tableStructDict)
 
-    def getArtifactContent(self, artifactElem):
+    def get_artifact_content(self, artifactElem):
         """ Return the text content inside an artifact element """
 
         text = ''
@@ -1249,7 +1240,7 @@ class PdfStructureMixin(object):
         return text
 
     @memoize
-    def artifactElements(self, pgnum):
+    def artifact_elements(self, pgnum):
         """ Return a list of all elements for /Artifact type
         objects in this page """
 
@@ -1261,7 +1252,7 @@ class PdfStructureMixin(object):
         # starting from ['/Artifact'...] ending with ['EMC']
         # as a generator
 
-        cs = self._contentStream(pgnum)
+        cs = self.content_stream(pgnum)
         mark = 0
         artElems = []
 
@@ -1289,7 +1280,7 @@ class PdfStructureMixin(object):
 
         return artElems
 
-    def isLzwEncoded(self):
+    def is_lzw_encoded(self):
         """ Return if the document or any image in the
         document is LZW encoded """
 
@@ -1297,7 +1288,7 @@ class PdfStructureMixin(object):
 
         # For each image object try to see if it is
         # LZW encoded
-        for i in self.imageIterator():
+        for i in self.image_iterator():
             f = i.get('/Filter', '')
             if f == 'LZWDecode':
                 return True
@@ -1316,8 +1307,8 @@ class PdfStructureMixin(object):
 
         return False
 
-    isScanned = property(lambda self: self.getIsScanned(), None, None)
-    structTree = property(lambda self:self.getStructureTree(), None, None)
-    font = property(lambda self: self.getFontResource(), None, None)
-    numImages = property(lambda self: self.getNumImages(), None, None)
+    is_scanned = property(lambda self: self.get_is_scanned(), None, None)
+    struct_tree = property(lambda self:self.get_structure_tree(), None, None)
+    font = property(lambda self: self.get_font_resource(), None, None)
+    num_images = property(lambda self: self.get_num_images(), None, None)
         

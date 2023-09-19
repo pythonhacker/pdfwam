@@ -38,13 +38,13 @@ class PdfTblStruct(object):
         # The page to which this table belongs
         self.page = 0
 
-    def setPage(self, pgnum):
+    def set_page(self, pgnum):
         self.page = pgnum
 
-    def getPage(self):
+    def get_page(self):
         return self.page
 
-    def isPageSet(self):
+    def is_page_set(self):
         return (self.page > 0)
     
     def add(self, elem):
@@ -174,7 +174,7 @@ class PdfAWAMHandler:
                 self.resultMap[awamId][(self.line,self.elementCount)]=Fail
             return 0
 
-    def getFlattenedPages(self, pgelem):
+    def get_flattened_pages(self, pgelem):
         """ Return list of pages as a flattened list """
 
         parent = pgelem['/Parent'].get_object()
@@ -190,7 +190,7 @@ class PdfAWAMHandler:
         pages = [pg.get_object() for pg in pages if pg != None]
         return pages
             
-    def awamHandler(self,element):
+    def handler(self,element):
         # Do the A-WAM checks on PDF structure element.
         # Applicability: /Document
         # Increase element count
@@ -252,13 +252,13 @@ class PdfAWAMHandler:
                 # Find if this has a page element
                 pg = element['/Pg']
 
-                if not self.tableStruct.isPageSet():
+                if not self.tableStruct.is_page_set():
                     # Find the page number
-                    pages = self.getFlattenedPages(pg)
+                    pages = self.get_flattened_pages(pg)
 
                     try:
                         pgnum = pages.index(pg) + 1
-                        self.tableStruct.setPage(pgnum)
+                        self.tableStruct.set_page(pgnum)
                     except ValueError:
                         pass
             except KeyError:
@@ -321,7 +321,7 @@ class PdfAWAMHandler:
                     try:
                         pg = element['/Pg']
                         # Find which page is this by looking at the index
-                        pgnum, pages = 1, self.getFlattenedPages(pg)
+                        pgnum, pages = 1, self.get_flattened_pages(pg)
 
                         for page in pages:
                             pgobj = page.get_object()
@@ -398,6 +398,6 @@ if __name__ == '__main__':
     # Test module
     a = PdfAWAMHandler(debug=1)
     pdfElement={'/Lang': 'no-NO', '/S': '/Document'}
-    a.awamHandler(pdfElement)
+    a.handler(pdfElement)
     print(a.resultMap)
     

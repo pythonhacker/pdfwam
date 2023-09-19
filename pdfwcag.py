@@ -1,8 +1,3 @@
-# -- coding: utf-8
-#
-# Copyright (C) Tingtun AS 2013.
-#
-
 import pdfStructureMixin
 import PyPDF2.generic as generic
 import re
@@ -46,7 +41,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
                     'wcag.pdf.18': 'title',
                     'wcag.pdf.16': 'natural language',
                     'wcag.pdf.sc244': 'accessible external links',
-                   # 'wcag.pdf.14': 'running headers/footers',
+                    # 'wcag.pdf.14': 'running headers/footers',
                     'wcag.pdf.15': 'submit buttons in forms',
                     'wcag.pdf.17': 'consistent page-numbers' }
                 
@@ -55,7 +50,8 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         self.verbose = verbose
 
     def get_json(self):
-
+        """ Return test results as a dictionary """
+        
         json = {
             'result' : [],
             'summary' : {},
@@ -76,7 +72,6 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         tfail, tpass = 0, 0
 
         for test_name, test_status in self.memo.items():
-
             msg = ''
 
             if test_status in (0, 1):
@@ -213,8 +208,8 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
     def runAllTests(self):
         """ Run all PDF WAM tests """
 
-        self.initAWAM()
-        self.processAWAM()
+        self.init()
+        self.process_awam()
         results = self.awamHandler.resultMap
 
         for test_id in self.test_ids:
@@ -276,7 +271,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         PDF page viewer controls and the PDF document.
         This is test #17 in WCAG 2.0 """
 
-        pl = self.getPageLabels()
+        pl = self.get_page_labels()
         # If no '/PageLabels' dictkey found, we
         # cannot validate this test, so return N.A
         if pl==None:
@@ -359,7 +354,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         # If there are no external links, the test isn't
         # applicable.
 
-        if not self.hasExternalLinks():
+        if not self.has_external_links():
             return 2
 
         # Has external links, but no tags
@@ -383,7 +378,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         wamdict['EGOVMON.A.WCAG.PDF.11']={}
         wamdict['EGOVMON.A.WCAG.PDF.13']={}
         
-        for extLink, pg in self.fetchExternalLinks():
+        for extLink, pg in self.get_external_links():
             count += 1
 
             # import pdb; pdb.set_trace()
@@ -448,7 +443,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         # form control has different ways of accessing these
         # fields, they have to be coded separately.
 
-        form = self.getFormObject()
+        form = self.get_form_object()
         
         # No forms found, test not applicable
         if form is None:
@@ -457,7 +452,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
 
         # import pdb;pdb.set_trace()
         types = collections.defaultdict(int)
-        for item in self.fetchFormFields(form):
+        for item in self.fetch_form_fields(form):
             try:
                 ffield = item.get_object()
                 types[ffield['/FT']] += 1
@@ -465,7 +460,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
                 pass
 
         print('All form field types =>', types)
-        for item in self.fetchFormFields(form):
+        for item in self.fetch_form_fields(form):
             # print 'Item=>',item
             
             # The set of rules given for this test are
@@ -589,7 +584,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         with an associated submit action. This is test #15 in PDF-WCAG2.0
         techniques """
 
-        form = self.getFormObject()
+        form = self.get_form_object()
         
         # No forms found, test not applicable
         if form==None:
@@ -598,7 +593,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
 
         pushbtns = []
         
-        for item in self.fetchFormFields(form):
+        for item in self.fetch_form_fields(form):
             # Find the submit button
             ffield = item.get_object()
             try:
@@ -611,8 +606,6 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
                     # break
             except KeyError:
                 pass
-
-        # import pdb; pdb.set_trace()
 
         for btn, name in pushbtns:
             # print 'Name=>',btn, name
@@ -669,7 +662,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         for tbl in list(self.awamHandler.tableStructDict.values()):
             pg = tbl.getPage()
             if tbl.invalid:
-                import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
                 self.updateResult(results[0], pg, tbl)
             else:
                 self.updateResult(results[1], pg, tbl)
@@ -693,7 +686,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         results = self.initResult()
         
         for pg in range(len(self.pages)):
-            for artifactElems in self.artifactElements(pg):
+            for artifactElems in self.artifact_elements(pg):
                 # First element is the artifact element
                 artifact, artype = artifactElems[0]
                 if artype=='BMC':
@@ -722,7 +715,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
                     self.updateResult(results[1], pg+1)                    
 
         self.logger.info('Number of img artifacts =>',imgArtifacts)
-        self.logger.info("Number of images =>", self.getNumImages())
+        self.logger.info("Number of images =>", self.get_num_images())
         self.logger.info("Numer of figure elements =>",len(self.awamHandler.figureEls))
         
         self.nArtifactImgs = imgArtifacts
@@ -762,7 +755,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         pgKeys = {}
         
         for pg in range(len(self.pages)):
-            artElems = self.artifactElements(pg)
+            artElems = self.artifact_elements(pg)
             for artifactElems in artElems:
                 # First element is the artifact element
                 artifact, artype = artifactElems[0]
@@ -907,7 +900,7 @@ class PdfWCAG(pdfStructureMixin.PdfStructureMixin):
         
         for p in range(len(self.pages)):
             try:
-                pg = self.getPage(p)
+                pg = self.pages[p]
                 tab = pg['/Tabs']
                 if tab == '/S':
                     count += 1
