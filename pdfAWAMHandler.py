@@ -1,114 +1,6 @@
-from PyPDF2.generic import IndirectObject, ArrayObject, DictionaryObject
+import pdfstruct
+from PyPDF2.generic import ArrayObject, DictionaryObject
 
-class PdfTblStructInvalidException(Exception):
-    pass
-
-class PdfTblStruct(object):
-    """ A class to evaluate structural validity of
-    PDF tables. Right now only checks for proper
-    hierarchy/reading order of elements inside all
-    tables in the given PDF document """
-    
-    # type dict that also acts as a child->parent mapping
-    typedict = {'/Table': '',
-                '/TR': '/Table',
-                '/TH': '/TR',
-                '/TD': '/TR'}
-
-    # parent->child mapping dict
-    childdict = {'/Table': ('/TR',),
-                 '/TR': ('/TH', '/TD'),
-                 '/TH': (),
-                 '/TD': ()}
-                      
-    def __init__(self):
-        self.init()
-        self.current=None
-
-    def init(self, root=None):
-        # Current element
-        self.current = root
-        # Not used
-        self.parent=None
-        # Previous element
-        self.prev=None
-        self.level = 0
-        # Invalid flag
-        self.invalid = 0
-        # The page to which this table belongs
-        self.page = 0
-
-    def set_page(self, pgnum):
-        self.page = pgnum
-
-    def get_page(self):
-        return self.page
-
-    def is_page_set(self):
-        return (self.page > 0)
-    
-    def add(self, elem):
-        """ Add a table element to the hierarchy """
-
-        # If table is already invalid returns 0. If
-        # this element adds incorrect structure, sets
-        # invalid flag and raises an Exception. Otherwise
-        # returns 1. If the element is the top level
-        # element or a duplicate, returns 0 as well.
-        
-        # Invalid structure, don't do anything
-        if self.invalid:
-            return 0
-        
-        # Check hieararchy
-        typ = elem['/S']
-        # Not a table element ?
-        if typ not in list(self.typedict.keys()):
-            return 0
-
-        if typ=='/Table':
-            self.init(elem)
-            return 0
-
-        # Sometimes, same element is called one after
-        # another, in that case ignore
-        if elem == self.prev:
-            return 0
-
-        # Parent type
-        parent_type = self.typedict[typ]
-        # child type
-        child_types = self.childdict[typ]
-        save = self.current
-        # Set previous to current
-        self.prev = save
-        # Set current to elem
-        self.current = elem
-        
-        # If previous type is same as parent's type
-        # then we are going down one level
-        prev_type = self.prev['/S']
-        # If prev_type matches parent's type
-        # then this is a level down
-        if prev_type == parent_type:
-            self.level += 1
-            self.parent = self.prev
-        # Otherwise prev_type can be same
-        # as current type
-        elif prev_type == typ:
-            pass
-        # Or prev type can be one type down
-        # in which case it is a level up
-        elif prev_type in child_types:
-            self.level -= 1
-        else:
-            import pdb;pdb.set_trace()
-            # Invalid structure
-            self.invalid = 1
-            raise PdfTblStructInvalidException("Error: Invalid table structure!")
-
-        return 1
-        
 class PdfAWAMHandler:
     """
     AWAM handler for PDF structure tree elements.
@@ -239,13 +131,14 @@ class PdfAWAMHandler:
             except Exception as e:
                 pass
                         
-        elif structureType in list(PdfTblStruct.typedict.keys()):
+        elif structureType in list(pdfstruct.PdfTblStruct.typedict.keys()):
             if structureType=='/Table':
-
+                # import pdb; pdb.set_trace()
+                
                 try:
                     self.tableStruct = self.tableStructDict[id(element)]
                 except KeyError:
-                    self.tableStruct = PdfTblStruct()
+                    self.tableStruct = pdfstruct.PdfTblStruct()
                     self.tableStructDict[id(element)] = self.tableStruct
 
             try:
@@ -262,13 +155,13 @@ class PdfAWAMHandler:
                     except ValueError:
                         pass
             except KeyError:
-                pass
+                raise
             
             
             try:
                 self.tableStruct.add(element)
-            except PdfTblStructInvalidException as e:
-                pass
+            except pdfstruct.PdfTblStructInvalidException as e:
+                raise
         
         # Applicability criterion: /Form
         elif structureType == '/Form':

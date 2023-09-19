@@ -5,7 +5,6 @@ pdfAWAM - Entry point into PDF accessibility checker
 
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
-from pdfStructureMixin import PdfStructureMixin
 
 import pdfwcag
 import logging
@@ -23,7 +22,6 @@ class PdfInitException(Exception):
 
     def __str__(self):
         return self.msg
-
 
 class DecryptionFailedException(Exception):
     """ Errors in decrypting an encrypted PDF file """
@@ -43,9 +41,10 @@ class PdfReaderWrapper(PdfReader, pdfwcag.PdfWCAG):
         self.strict = False
         self.logger = logger
         self.stream = stream
-        pdfwcag.PdfWCAG.__init__(self)
+        # Rewind stream to beginning
+        pdfwcag.PdfWCAG.__init__(self, stream=stream)
         PdfReader.__init__(self, stream)
-        PdfStructureMixin.read(self, stream)
+        # PdfStructureMixin.read(self, stream)
         # Fill in document information
         self.fill_info()
         # Set the root object
@@ -121,7 +120,7 @@ def extractAWAMIndicators(pdf,
 
             print('***PDF Summary: End ****\n')
 
-        pdfobj.runAllTests()
+        pdfobj.run_all_tests()
     except DecryptionFailedException:
         # We are unable to decrypt document.
         # We have got no parsed pdfobj, and cannot do much more,

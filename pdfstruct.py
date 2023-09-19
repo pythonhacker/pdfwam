@@ -1,138 +1,169 @@
-import re
-import config
-import random
-import logging
+""" Provides class methods to query and perform operations on the PDF object structure """
 
+import re
+import helper
+import random
 from PyPDF2.generic import *
 from PyPDF2.filters import *
-from pdfAWAMHandler import PdfAWAMHandler
 
 pdf_version_re = re.compile('PDF\-\d\.\d$')
-
-def memoize(function):
-    """ Memoizing decorator serving as a cache for functions
-    whose state is memoized in dictionaries """
-
-    _memoized = {}
-
-    def wrapper(instance, *args):
-        # Create a place holder for the instance
-        try:
-            _memoized[instance]
-        except KeyError:
-            _memoized[instance] = {}
-
-        # Cache the functions output or return from
-        # previously cached data.
-        try:
-            return _memoized[instance][args]
-        except KeyError:
-            _memoized[instance][args] = function(instance, *args)
-            return _memoized[instance][args]
-
-    return wrapper
-
-def int2bin(n, count=32):
-    """ Returns the binary of integer n as string, using count number of digits """
-
-    return "".join([str((n >> y) & 1) for y in range(count-1, -1, -1)])
-
-class PdfStructureError(Exception):
+    
+class PdfTblStructInvalidException(Exception):
     pass
 
-class PdfStructureMixin(object):
-    """ This is intended as a mix-in class for PyPDF to
-        provide PDF AWAM handling and evaluation for the EIAO Observatory.
-    """
+class PdfTblStruct(object):
+    """ A class to evaluate structural validity of
+    PDF tables. Right now only checks for proper
+    hierarchy/reading order of elements inside all
+    tables in the given PDF document """
+    
+    # type dict that also acts as a child->parent mapping
+    typedict = {'/Table': '',
+                '/TR': '/Table',
+                '/TH': '/TR',
+                '/TD': '/TR'}
 
-    # PDF version is righ at the beginning
-    # it has to be a string like '%PDF-<major>.<minor>'
-    version_re = re.compile(r'\%PDF-\d+\.\d+', re.IGNORECASE)
-    # Header types
-    header_re = re.compile(r'/h[1-9]',re.IGNORECASE)
-    # Parsed form field element types
-    # (from WCAG 2.0 techniques)
-    form_elems = ('/Tx','/Btn','/Ch','/Sig')
+    # parent->child mapping dict
+    childdict = {'/Table': ('/TR',),
+                 '/TR': ('/TH', '/TD'),
+                 '/TH': (),
+                 '/TD': ()}
+                      
+    def __init__(self):
+        self.init()
+        self.current=None
 
-    def __init__(self, logger=None):
-        self.version = ''
-        self.creator = ''
-        self.producer = ''
-        self.author = ''
-        self.subject = ''
-        self.title = ''
-        # Root object
-        self.root = None
-        # Numbers tree
-        self.numstree = {}
-        # Structure tree root
-        self.structroot = None
-        # Page number where error is seen
+    def init(self, root=None):
+        # Current element
+        self.current = root
+        # Not used
+        self.parent=None
+        # Previous element
+        self.prev=None
+        self.level = 0
+        # Invalid flag
+        self.invalid = 0
+        # The page to which this table belongs
         self.page = 0
-        # List of producers which produce scanned PDF
-        self.scproducers = ["Adobe PDF Scan Library",
-                            "KONICA MINOLTA bizhub C253",
-                            "Hewlett-Packard Intelligent Scanning Technology",
-                            "Canon iR C2880"]
 
-        # dictionary of processed AWAM IDs here
-        # this helps to make the code more readable
-        self.awamids = {'wcag.pdf.18': 'EIAO.A.15.1.1.4.PDF.1.1',
-                        'wcag.pdf.16': 'EIAO.A.10.4.1.4.PDF.1.1',
-                        'egovmon.pdf.05': 'EIAO.A.10.8.1.4.PDF.1.1',
-                        'egovmon.pdf.08': 'EIAO.A.10.3.1.4.PDF.1.1',
-                        'wcag.pdf.09': 'EIAO.A.10.3.5.4.PDF.1.1',
-                        'wcag.pdf.02': 'EIAO.A.10.13.3.4.PDF.1.1',
-                        'egovmon.pdf.03': 'EIAO.A.10.3.2.4.PDF.1.1'
-                        }
+    def set_page(self, pgnum):
+        self.page = pgnum
 
-        self.nArtifactImgs = 0
-        self.memo = {}
-        self.verbose = True
-        # Logger
-        self.logger = logging.getLogger('pdfwam')
+    def get_page(self):
+        return self.page
 
-    def read(self, stream):
-        """ Read the PDF file """
+    def is_page_set(self):
+        return (self.page > 0)
+    
+    def add(self, elem):
+        """ Add a table element to the hierarchy """
 
-        # Rewind stream to beginning
-        stream.seek(0)
-        # This just reads the PDF version
-        # Rest is handled by pyPdf.
-        s = stream.read(8).decode("utf-8")
-        if not self.version_re.match(s):
-            self.logger.error("PdfStructureError: Missing PDF version marker!")
-            raise PdfStructureError('Error - missing PDF version marker!')
+        # If table is already invalid returns 0. If
+        # this element adds incorrect structure, sets
+        # invalid flag and raises an Exception. Otherwise
+        # returns 1. If the element is the top level
+        # element or a duplicate, returns 0 as well.
+        
+        # Invalid structure, don't do anything
+        if self.invalid:
+            return 0
+        
+        # Check hieararchy
+        typ = elem['/S']
+        # Not a table element ?
+        if typ not in list(self.typedict.keys()):
+            return 0
 
-        self.version = s.replace('%PDF-','')
+        if typ=='/Table':
+            self.init(elem)
+            return 0
 
-    def fill_info(self):
+        # Sometimes, same element is called one after
+        # another, in that case ignore
+        if elem == self.prev:
+            return 0
 
-        # This is called after PDF parsing is done
-        # by pyPdf. So fill in document info from
-        # Info marker.
-        metadata = self.metadata
-        self.logger.info("Getting document metainfo...")
-        # Should be called after any decryption of the PDF
-        self.creator = metadata.get("/Creator", '')
-        self.producer = metadata.get("/Producer", '')
-        self.author = metadata.get("/Author", '')
-        self.title = metadata.get("/Title", '')
-        self.subject = metadata.get("/Subject", '')
-        self.ctime = metadata.get("/CreationDate", '')
-        self.mtime = metadata.get("/ModDate", '')
+        # Parent type
+        parent_type = self.typedict[typ]
+        # child type
+        child_types = self.childdict[typ]
+        save = self.current
+        # Set previous to current
+        self.prev = save
+        # Set current to elem
+        self.current = elem
+        
+        # If previous type is same as parent's type
+        # then we are going down one level
+        prev_type = self.prev['/S']
+        # If prev_type matches parent's type
+        # then this is a level down
+        if prev_type == parent_type:
+            self.level += 1
+            self.parent = self.prev
+        # Otherwise prev_type can be same
+        # as current type
+        elif prev_type == typ:
+            pass
+        # Or prev type can be one type down
+        # in which case it is a level up
+        elif prev_type in child_types:
+            self.level -= 1
+        else:
+            # import pdb;pdb.set_trace()
+            # Invalid structure
+            self.invalid = 1
+            raise PdfTblStructInvalidException("Error: Invalid table structure!")
 
-        # Fix indirect objects if any.
-        for field in ('creator','producer','author','title','subject'):
-            val = getattr(self, field)
-            if type(val) == IndirectObject:
-                try:
-                    actual_val = str(val.get_object())
-                    setattr(self, field, actual_val)
-                except Exception as e:
-                    self.logger.error('Error getting object from IndirectObject for property',field,'...')
-                    self.logger.error('\tError is',e)
+        return 1
+        
+class PdfStruct(object):
+    """ Provide structure and methods on the enclosing PDF object """
 
+    # NOTE - This has to be used as a mixin or parent class for
+    # a class that inherits from PyPDF2.PdfReader. It does not work
+    # on its own.
+    def fix_indirect_object_xref(self):
+        """ Fix indirect cross object references """
+
+        self.logger.info("Fixing indirect object X references")
+
+        xref = self.xref
+
+        root_idnums = []
+        for item in list(self.root.values()):
+            if type(item) is IndirectObject:
+                root_idnums.append(item.idnum)
+            else:
+                root_idnums.append(-1)
+
+        wrongids = []
+        gens = []
+        # Fix the indirect object generations by
+        # cross checking with the xref dictionary
+        for generation in list(xref.keys()):
+            idrefs = xref[generation]
+            gens.append(generation)
+
+            for idnum, val in list(idrefs.items()):
+                # Check if this object exists in root dictionary
+                if idnum in root_idnums:
+                    idx = root_idnums.index(idnum)
+                    obj = list(self.root.values())[idx]
+                    # Fix generation, if mismatch
+                    if obj.generation != generation:
+                        wrongids.append([idnum, generation, obj.generation])
+
+        self.xref2 = {}
+        for g in gens:
+            self.xref2[g] = {}
+
+        for idnum, oldgen, gen in wrongids:
+            idref = xref[oldgen]
+            ref = idref[idnum]
+            xref[gen][idnum] = ref
+            del idref[idnum]
+    
     def build_numbers_tree(self):
         """ Make numbers dictionary from structure tree """
 
@@ -141,6 +172,7 @@ class PdfStructureMixin(object):
         self.logger.info("Making numbers tree")
         # Structure tree WAMs
         try:
+            # import pdb;pdb.set_trace()
             self.structroot = self.root['/StructTreeRoot'].get_object()
         except (KeyError, ValueError, AssertionError) as e:
             # We are not sure on the struct tree - so allow it to be true
@@ -198,302 +230,6 @@ class PdfStructureMixin(object):
         for i in range(0,len(keys)):
             self.numstree[keys[i]]=values[i]
 
-    def encode_ascii(self, val):
-        """ Encode string in ASCII and return """
-
-
-        try:
-            if type(val) == IndirectObject:
-                val = str(val.get_object())
-
-            val_a = str(val, 'ascii', 'ignore').encode()
-        except TypeError:
-            val_a = val.encode('ascii', 'ignore')
-
-        return val_a
-
-    def assign_mwam_ids(self):
-        """ Assign MWAM PDF property IDs """
-
-        self.logger.info("Assigning MWAM ids")
-
-        attrs = ('title','author','version','ctime','mtime','producer','creator')
-        vals = [getattr(self, x) for x in attrs]
-        items = list(map(self.encode_ascii, vals))
-        self.logger.debug("MWAM properties =>", items)
-
-        # Title MWAM
-        self.awamHandler.resultMap['EGOVMON.PDF.PROP.01'] = {(0, 1): items[0].decode()}
-        # Author MWAM
-        self.awamHandler.resultMap['EGOVMON.PDF.PROP.02'] = {(0, 1): items[1].decode()}
-        # Version MWAM
-        self.awamHandler.resultMap['EGOVMON.PDF.PROP.03'] = {(0, 1): items[2].decode()}
-        # Creation time MWAM
-        self.awamHandler.resultMap['EGOVMON.PDF.PROP.04'] = {(0, 1): items[3].decode()}
-        # Modification time MWAM
-        self.awamHandler.resultMap['EGOVMON.PDF.PROP.05'] = {(0, 1): items[4].decode()}
-        # Producer MWAM
-        self.awamHandler.resultMap['EGOVMON.PDF.PROP.06'] = {(0, 1): items[5].decode()}
-        # Creator MWAM
-        self.awamHandler.resultMap['EGOVMON.PDF.PROP.07'] = {(0, 1): items[6].decode()}
-
-    def init(self):
-        """ Initialize objects required for processing """
-
-        self.logger.info("Initializing AWAM")
-
-        # Make the nums tree
-        self.build_numbers_tree()
-
-        try:
-            roleMap=self.structroot['/RoleMap'].get_object()
-        except (KeyError, ValueError, AssertionError) as e:
-            roleMap=None
-        except Exception as e:
-            roleMap=None
-
-        # Fill in the meta AWAM ids
-        # awamHandler is the object
-        self.awamHandler=PdfAWAMHandler(roleMap=roleMap,debug=0,
-                                        validateImages=int(config.pdfwamvalidateimgs),
-                                        ignoreSingleBitImgs=int(config.pdfwamignoresinglebitimgs))
-        # awam_handler is the function!
-        self.awam_handler=self.awamHandler.handler
-
-        # Initialize all AWAM IDs
-        for awamid in list(self.awamids.values()):
-            self.awamHandler.resultMap[awamid] = {(0,1): 0}
-
-    def set_awam_id(self, name, value=1, page=0):
-        """ Set the value for the AWAM ID matching the given test """
-
-        self.awamHandler.resultMap[self.awamids.get(name)] = {(page,1): value}
-        self.memo[name] = value
-
-    def process_awam(self):
-        """ Fill the AWAM dictionary with information for each
-        supported WAM identifier, including the structure tree """
-
-        self.assign_mwam_ids()
-
-        # Some AWAMs are processed right here. These are,
-
-        # Title AWAM - WCAG.PDF.18
-        self.set_awam_id('wcag.pdf.18', int(len(self.title)>0))
-        # Lang AWAM - WCAG.PDF.16
-        # Some documents define language in the root object as '/Lang' attribute
-        try:
-            lang = self.root['/Lang']
-            self.set_awam_id('wcag.pdf.16', 1)
-            self.awamHandler.resultMap['EIAO.A.0.0.0.0.4.PDF.4.1'] = lang
-            # Set langcheck flag
-            self.awamHandler.langcheck = True
-        except:
-            self.set_awam_id('wcag.pdf.16', 0)
-
-        # Encryption AWAM -> EGOVMON.PDF.05
-        encrypted = '/Encrypt' in self.trailer
-        if not encrypted:
-            self.set_awam_id('egovmon.pdf.05', 1)
-        else:
-            # Get encrytption dictionary
-            encd = self.trailer['/Encrypt']
-            # Get /R value
-            revision = encd.get('/R',2)
-            permissions = int2bin(encd.get('/P',1))
-            bit5, bit10 = int(permissions[-5]), int(permissions[-10])
-            # For revision 2, we check only bit5
-            if revision==2:
-                self.set_awam_id('egovmon.pdf.05', bit5)
-            # For revision>=3,we do an OR
-            elif revision>=3:
-                self.set_awam_id('egovmon.pdf.05', bit5|bit10)
-
-        # Scanned PDF AWAM -> EGOVMON.PDF.08
-        self.set_awam_id('egovmon.pdf.08', int(not self.get_is_scanned()))
-
-        # Consistent headers AWAM -> WCAG.PDF.09
-        if (self.structroot != None) and (len(self.structroot) > 0):
-            flag = self.document_headers_consistent()
-            if flag:
-                self.set_awam_id('wcag.pdf.09', 1)
-            else:
-                # Adding page number where this failed
-                self.set_awam_id('wcag.pdf.09', 0, self.page)
-        else:
-            # We need to remove the entry from results since
-            # we pre-initialize everything now
-            del self.awamHandler.resultMap[self.awamids.get('wcag.pdf.09')]
-            self.logger.info('Document header check not applicable because struct-tree is absent')
-
-        # Bookmarks AWAM -> WCAG.PDF.02
-        self.set_awam_id('wcag.pdf.02', int(self.has_bookmarks()))
-
-        # Structure tags AWAM -> EGOVMON.PDF.03
-        if self.structroot==None:
-            self.set_awam_id('egovmon.pdf.03', 0)
-            return
-        else:
-            # For the time being, we are setting this entry to pass even
-            # if the structure tree root object cannot be accessed by pyPdf
-            # (example: for the document tests/fw208_accessible.pdf)
-            self.set_awam_id('egovmon.pdf.03', 1)
-
-        # If structroot is None or empty return
-        if (self.structroot==None) or (len(self.structroot)==0):
-            self.logger.warning("Empty structure tree root")
-            return
-
-        try:
-            # Search the /K kids of the structure tree root
-            if type(self.structroot['/K']) is list:
-                self.search(self.structroot['/K'])
-            else:
-                self.search(self.structroot['/K'].get_object())
-        except KeyError as ex:
-            self.logger.error('Error getting key "/K" from struct root:', ex)
-
-        # Update the memo with WCAG.PDF.01 result
-        handler = self.awamHandler
-        nimgs = len(handler.figureEls)
-
-        if nimgs>0:
-            # Some images are present so wcag.pdf.01 is applicable
-            nfimgs = len(handler.failedImgs)
-            self.memo['wcag.pdf.01'] = (nfimgs, nimgs - nfimgs)
-
-    def awam_dispatcher(self, item):
-        """ Dispatch function calls to AWAM handler """
-
-        if type(item) in (NameObject, NumberObject):
-            self.awam_handler(item)
-        elif type(item) in (dict, DictionaryObject, IndirectObject):
-            try:
-                if type(item['/S']) is IndirectObject:
-                    self.search(item['/S'])
-                else:
-                    self.awam_handler(item)
-                    # Ticket #125: Need to search recursively
-                    # into the Kids of this object, if any
-                    try:
-                        item_kids = item['/K']
-                        for k in item_kids:
-                            try:
-                                # This is important since a Kid might
-                                # be a number object, so it can cause
-                                # an exception and then control may
-                                # not pass on to next kid ! - this
-                                # caused a bug in wrong reporting of
-                                # link annotation test failure for OO
-                                # exported PDF documents.
-                                self.search(k.get_object())
-                            except:
-                                pass
-                    except:
-                        pass
-
-            except KeyError as e:
-                # FIXME: Check if this always should be pass
-                pass
-        else:
-            self.logger.error("PdfStructureError: invalid type of item",type(item))
-            raise PdfStructureError
-
-        return
-
-    def search(self, tree):
-        """ Traverse the PDF structure tree which is a PDF number tree """
-
-        # Print all items within the branch
-        if type(tree) in (NameObject, NumberObject):
-            return
-
-        if type(tree) in (IndirectObject, dict, DictionaryObject):
-            self.awam_dispatcher(tree)
-            # Try to search kids of this tree
-            try:
-                self.search(tree['/K'])
-            except KeyError as e:
-                pass
-
-        elif type(tree) in (list, ArrayObject):
-            for item in tree:
-                item_obj = item.get_object()
-                self.awam_dispatcher(item_obj)
-
-                try:
-                    l = item_obj['/K']
-                except KeyError:
-                    # Item has no kids.
-                    continue
-                except TypeError:
-                    # An object that is unsubscriptable
-                    # like a NumberObject
-                    continue
-                    
-
-                # Ticket #125: Need to check for type ArrayObject
-                # also, otherwise we might skip Kids of this
-                # object
-                if type(l) not in (list, ArrayObject):
-                    l = [l]
-
-                for kid in l:
-                    kid = kid.get_object()
-
-                    if type(kid) is IndirectObject:
-                        self.awam_dispatcher(kid)
-                    elif type(kid) in (dict, DictionaryObject):
-                        self.awam_dispatcher(kid)
-                    elif type(kid) is (int, NumberObject):
-                        self.awam_dispatcher(self.numstree[kid])
-        else:
-            self.logger.error("PdfStructureError: invalid type of item", type(tree))
-            raise PdfStructureError
-
-        return
-
-    def fix_indirect_object_xref(self):
-        """ Fix indirect cross object references """
-
-        self.logger.info("Fixing indirect object X references")
-
-        xref = self.xref
-
-        root_idnums = []
-        for item in list(self.root.values()):
-            if type(item) is IndirectObject:
-                root_idnums.append(item.idnum)
-            else:
-                root_idnums.append(-1)
-
-        wrongids = []
-        gens = []
-        # Fix the indirect object generations by
-        # cross checking with the xref dictionary
-        for generation in list(xref.keys()):
-            idrefs = xref[generation]
-            gens.append(generation)
-
-            for idnum, val in list(idrefs.items()):
-                # Check if this object exists in root dictionary
-                if idnum in root_idnums:
-                    idx = root_idnums.index(idnum)
-                    obj = list(self.root.values())[idx]
-                    # Fix generation, if mismatch
-                    if obj.generation != generation:
-                        wrongids.append([idnum, generation, obj.generation])
-
-        self.xref2 = {}
-        for g in gens:
-            self.xref2[g] = {}
-
-        for idnum, oldgen, gen in wrongids:
-            idref = xref[oldgen]
-            ref = idref[idnum]
-            xref[gen][idnum] = ref
-            del idref[idnum]
-
     def content_stream(self, pgnum):
         """ Given a page number, return its content stream """
 
@@ -504,104 +240,9 @@ class PdfStructureMixin(object):
                 content = ContentStream(content, self)
             except Exception as e:
                 self.logger.error('Error while creating content stream for page %d: [%s]' % (pgnum, str(e)))
-                return None
+                return
 
         return content
-
-    def document_headers_consistent(self):
-        """ Return whether the document uses headers consistently.
-        This returns True if document has no headers at all """
-
-        # Load all pages info
-        try:
-            if len(self.outline)==0:
-                self.logger.warning('Warning: document has no headers!')
-                # No headers in document
-                return True
-        except Exception as ex:
-            self.logger.error('Error accessing self.outline attribute - ', ex)
-            # return True
-
-        # Load all pages info
-        # Flatten page dictionary
-        self._flatten()
-        pgs = self.flattened_pages
-
-        # Numbers dictionary, get all header types from it
-        vals = [v.get_object() for v in list(self.numstree.values())]
-
-        headers = {}
-        for count in range(len(self.pages)):
-            headers[count+1] = []
-
-        for v in vals:
-            items = [item.get_object() for item in v]
-            for item in items:
-                try:
-                    if self.header_re.match(item['/S']):
-                        # Get page to which the item belongs
-                        try:
-                            item_pg = item['/Pg']
-                        except KeyError:
-                            print('No /Pg key found, checking inside /K')
-                            item_pg = item['/K']['/Pg']
-                        # Get page number
-                        try:
-                            pgnum = pgs.index(item_pg) + 1
-                            headers[pgnum].append(item)
-                        except ValueError:
-                            # Page not matching, skip this
-                            pass
-
-                except TypeError as e:
-                    pass
-
-        # The first header if any should be H1, otherwise
-        # we can return error straight-
-        firstpg = 1
-        if len(headers):
-            # Get first header
-            for pgnum in headers:
-                if len(headers[pgnum]):
-                    # First header
-                    firstpg, hdr1 = pgnum, headers[pgnum][0]['/S'].lower()
-                    self.logger.debug('First header=>',firstpg, hdr1)
-                    if hdr1 != '/h1':
-                        self.logger.error('Error: Document starts with header %s(page:%d)' % (hdr1, pgnum))
-                        self.page = pgnum
-                        return False
-                    # Break otherwise
-                    break
-
-        # Heading level skip check
-        l,lprev,pgprev=0,0,0
-        for pgnum in range(firstpg, len(self.pages)+1):
-            pghdrs = headers[pgnum]
-            # No headers in page, continue
-            if len(pghdrs)==0: continue
-            try:
-                levels = [int(item['/S'].lower().replace('/h','')) for item in pghdrs]
-            except ValueError as e:
-                print(('Error:',e))
-                continue
-
-            for l in levels:
-                # Shouldn't jump levels
-
-                if l>lprev:
-                    if (l-lprev)>1:
-                        # Skipping header level
-                        self.logger.error('Error: Header inconsistency in pg %d: level h%d follows h%d (pg:%d)!' % (pgnum, l, lprev, pgprev))
-                        self.page = pgnum
-                        return False
-                elif l<lprev:
-                    # Pass
-                    pass
-
-                lprev = l
-                pgprev = pgnum
-
-        return True
 
     def has_bookmarks(self):
         """ Return whether the PDF document has bookmarks """
@@ -701,22 +342,7 @@ class PdfStructureMixin(object):
                     count += 1
 
         return False
-
-    def document_has_columns(self):
-        """ Find out if the document has multiple columns """
-
-        # Check all pages
-        pgs = []
-        for pgnum in range(0, len(self.pages)):
-            if self._has_columns(pgnum):
-                pgs.append(str(pgnum+1))
-
-        if len(pgs):
-            self.logger.info('These pages have multiple columns: %s' % ','.join(pgs))
-            return True
-
-        return False
-
+    
     def _has_multimedia(self, pgnum):
         """ Find out if a given page has embedded or
         linked multi-media (video/audio) content """
@@ -1129,7 +755,7 @@ class PdfStructureMixin(object):
             return self._get_is_scanned() and \
                    self._get_is_scanned(pg1) and \
                    self._get_is_scanned(pg2)
-
+    
     def _get_is_scanned(self, pgnum=0):
         """ Return whether document is scanned w.r.t the given page """
 
@@ -1204,11 +830,11 @@ class PdfStructureMixin(object):
 
     def get_num_artifact_imags(self):
         """ Return number of images which are artifacts """
-        return self.nArtifactImgs
+        return self.n_artifact_imgs
 
     def get_num_tables(self):
         return len(self.awamHandler.tableStructDict)
-
+    
     def get_artifact_content(self, artifactElem):
         """ Return the text content inside an artifact element """
 
@@ -1239,7 +865,8 @@ class PdfStructureMixin(object):
 
         return text
 
-    @memoize
+
+    @helper.memoize
     def artifact_elements(self, pgnum):
         """ Return a list of all elements for /Artifact type
         objects in this page """
@@ -1306,9 +933,3 @@ class PdfStructureMixin(object):
                 pass
 
         return False
-
-    is_scanned = property(lambda self: self.get_is_scanned(), None, None)
-    struct_tree = property(lambda self:self.get_structure_tree(), None, None)
-    font = property(lambda self: self.get_font_resource(), None, None)
-    num_images = property(lambda self: self.get_num_images(), None, None)
-        
