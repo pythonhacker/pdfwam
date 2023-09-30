@@ -1,4 +1,5 @@
 import re
+import json
 import collections
 import pdfstruct
 import logging
@@ -105,7 +106,7 @@ class PdfWCAG(pdfstruct.PdfStruct):
         self.memo = {}
         self.verbose = verbose
         # Logger
-        self.logger = logging.getLogger('pdfwam')        
+        self.logger = helper.get_logger()        
         # Read the PDF for signature
         # self.read(self.stream)
         
@@ -153,7 +154,6 @@ class PdfWCAG(pdfstruct.PdfStruct):
 
     def encode_ascii(self, val):
         """ Encode string in ASCII and return """
-
 
         try:
             if type(val) == IndirectObject:
@@ -524,6 +524,8 @@ class PdfWCAG(pdfstruct.PdfStruct):
             try:
                 func = getattr(self, func_name)
                 ret = func()
+                # return 2 means we are not sure and we
+                # pass the test
                 if (type(ret) is int) and ret != 2:
                     # Test produced either 0 or 1
                     results[egov_test_id] = {(0,1): int(ret)}
@@ -797,12 +799,14 @@ class PdfWCAG(pdfstruct.PdfStruct):
         # fields, they have to be coded separately.
 
         form = self.get_form_object()
+        # import pdb;pdb.set_trace()
         
         # No forms found, test not applicable
         if form is None:
-            self.logger.info('No Form object found in Document')
+            print('no form object found in document')
             return 2
 
+        print('document has accessible forms')
         # import pdb;pdb.set_trace()
         types = collections.defaultdict(int)
         for item in self.fetch_form_fields(form):
@@ -928,7 +932,7 @@ class PdfWCAG(pdfstruct.PdfStruct):
                         # an error as well.
                         continue
 
-        self.logger.info('wcag.pdf.12 - Test passed')
+        print('wcag.pdf.12 - Test passed')
         # Everything fine
         return 1
             
@@ -961,7 +965,7 @@ class PdfWCAG(pdfstruct.PdfStruct):
                 pass
 
         for btn, name in pushbtns:
-            # print 'Name=>',btn, name
+            # print('Name=>',btn, name)
             try:
                 ca = btn['/MK']['/CA']
                 # CHECKME: Is this only found for "Send email" type buttons ?
@@ -1082,7 +1086,7 @@ class PdfWCAG(pdfstruct.PdfStruct):
         # Not applicable
         return 2
 
-    def test_WCAG_PDF_14(self):
+    def document_has_running_headers_and_footers(self):
         """ Test if the document provides running page headers
         and footers. This is test #14 in PDF WCAG 2.0 techniques 
 
@@ -1232,7 +1236,7 @@ class PdfWCAG(pdfstruct.PdfStruct):
         
         return results
 
-    def test_WCAG_PDF_03(self):
+    def document_has_consistent_tab_reading_order(self):
         """ This test checks consistent tab and reading
         order for PDF documents. This is test #3 in
         WCAG 2.0 """
@@ -1251,7 +1255,6 @@ class PdfWCAG(pdfstruct.PdfStruct):
         # enough to pass this test.
 
         count = 0
-        
         for p in range(len(self.pages)):
             try:
                 pg = self.pages[p]
@@ -1261,7 +1264,6 @@ class PdfWCAG(pdfstruct.PdfStruct):
             except KeyError:
                 pass
 
-
         if count == len(self.pages):
             # Passed
             return 1
@@ -1269,10 +1271,10 @@ class PdfWCAG(pdfstruct.PdfStruct):
         # Failed
         return 0
 
-    def get_json(self):
-        """ Return test results as a dictionary """
+    def get_dict(self):
+        """ Return test results as a dictionary converted to JSON """
         
-        json = {
+        res = {
             'result' : [],
             'summary' : {},
         }
@@ -1313,11 +1315,11 @@ class PdfWCAG(pdfstruct.PdfStruct):
 
             descr = self.test_id_desc.get(test_name, 'N.A')
 
-            json['result'].append({'Test': test_name, 'Status': msg, 'Description': descr})
+            res['result'].append({'Test': test_name, 'Status': msg, 'Description': descr})
 
-        json['summary'] = {'Total' : (tfail + tpass), 'Fail' : tfail, 'Pass' : tpass}
-
-        return json
+        res['summary'] = {'Total' : (tfail + tpass), 'Fail' : tfail, 'Pass' : tpass}
+        
+        return res
 
     def print_report(self):
         """ Print a report of the tests run and their status """
@@ -1376,4 +1378,5 @@ class PdfWCAG(pdfstruct.PdfStruct):
     test_WCAG_PDF_12 = document_has_accessible_forms
     test_WCAG_PDF_15 = document_has_accessible_submit_buttons
     test_WCAG_PDF_11_13 = document_has_accessible_hyperlinks
-    
+    test_WCAG_PDF_14 = document_has_running_headers_and_footers
+    test_WCAG_PDF_03 = document_has_consistent_tab_reading_order

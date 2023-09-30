@@ -1,4 +1,22 @@
 """ Helper functions """
+import logging
+
+def get_logger(name='pdfwam'):
+    return FakeLogger(name)
+
+class FakeLogger:
+    def __init__(self, name='pdfwam'):
+        self.log = logging.getLogger(name)
+        self.log.addHandler(logging.StreamHandler())
+        self.log.setLevel(logging.INFO)
+
+    def debug(self, msg, *args):
+        arguments = [msg]
+        for arg in args:
+            arguments.append(str(arg))
+        self.log.info(' '.join(arguments))
+
+    info = warning = error = debug        
 
 def memoize(function):
     """ Memoizing decorator serving as a cache for functions

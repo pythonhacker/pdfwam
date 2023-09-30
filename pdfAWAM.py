@@ -6,10 +6,10 @@ pdfAWAM - Entry point into PDF accessibility checker
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 
+import helper
 import pdfwcag
 import logging
 import config
-
 import time
 import io
 import traceback
@@ -52,9 +52,8 @@ class PdfReaderWrapper(PdfReader, pdfwcag.PdfWCAG):
     
 def extractAWAMIndicators(pdf,
                           password='',
-                          verbose=True,
+                          verbose=False,
                           report=False,
-                          developer=False,
                           json_value=False,
                           console=False,
                           logger=None):
@@ -62,10 +61,11 @@ def extractAWAMIndicators(pdf,
 
     t = time.time()
     print('Log level is set to',config.pdfwamloglevel)
+    # print('JSON value =>', json_value)
 
     if logger == None:
-        logger = logging.getLogger('pdfawam')
-    
+        logger = helper.get_logger()
+        
     # Takes an optional password which can be used to
     # unlock the document for encrypted documents.
     try:
@@ -73,42 +73,22 @@ def extractAWAMIndicators(pdf,
         pdfobj = PdfReaderWrapper(pdf, password, logger)
         pdfobj.verbose = verbose
         
-        # pdfobj.read()
         pdfobj.fix_indirect_object_xref()
 
         # If developer, just print a dictionary containing
         # meta info, scanned, forms, tagged, permissions
         # and an accessibility score.
-        if developer:
-            pdfobj.init()
-            pdfobj.process_awam()            
-            devdict = { 'title': pdfobj.title,
-                        'creator': pdfobj.creator,
-                        'producer': pdfobj.producer,
-                        'author': pdfobj.author,
-                        'subject': pdfobj.subject,
-                        'created': pdfobj.ctime,
-                        'scanned': pdfobj.is_scanned,
-                        'tagged': (pdfobj.struct_tree != None),
-                        'form': pdfobj.has_valid_forms(),
-                        'permissions': pdfobj.awamHandler.resultMap['EIAO.A.10.8.1.4.PDF.1.1'].get((0,1),0),
-                        'lang': pdfobj.awamHandler.resultMap.get('EIAO.A.0.0.0.0.4.PDF.4.1',''),
-                        'numpages': len(pdfobj.pages)
-                        }
-            
-            return devdict
-        
+        pdfobj.init()
+        pdfobj.process_awam()            
+
         if verbose:
-            # NOTE - These are supposed to be printed to STDOUT
-            # so don't wrap them in logging !
-            
             print("***PDF Summary: Start***")
             print('Version:',pdfobj.version)
             print('#Pages:', len(pdfobj.pages))
             print('Producer:',pdfobj.producer)
             print('Creator:',pdfobj.creator)
             if pdfobj.title:
-                print('Title=>',pdfobj.title)
+                print('Title:',pdfobj.title)
             else:
                 print('Title: (None)')
 
@@ -160,9 +140,8 @@ def extractAWAMIndicators(pdf,
     
     logger.info('Processed in %.2f seconds' % (time.time() - t))
     rmap = pdfobj.awamHandler.resultMap
-    logger.debug('\n***AWAM Dictionary***')
-    logger.debug(rmap)
-
+    # import pdb;pdb.set_trace()
+    
     if verbose:
         for id in list(rmap.keys()):
             value = rmap[id]
@@ -178,7 +157,7 @@ def extractAWAMIndicators(pdf,
     print('-'*80)
 
     if json_value:
-        return pdfobj.get_json()
+        return pdfobj.get_dict()
 
     return rmap
         
