@@ -34,3 +34,29 @@ For example,
 The following shell command can be used as a short-cut to run the checker against all files in the test suite.
 
 	for i in $(find ./testfiles -name \*.pdf); do python pdfchecker.py "$i" -r; done
+
+## Code Structure
+
+ Core
+ 
+     PdfStruct <--- PdfWCAG <---<testing>-- PdfReaderWrapper --<read>-> PyPDF2.PdfReader 
+
+    This gives you the AWAMs.
+	1. A WAM -> Accessibility WAM
+	2. B WAM -> Barrier WAMs (compose AWAM data) 
+    3. M WAM -> Metadata WAMs -> wraps up on top of metadata like creator, producer etc.
+   
+ Service
+
+     extractAWAMIndicators (pdfAWAM.py)
+
+     Wrap this up in some simple service
+	   * protobuf (if you want to get funky on this)
+	   * RestFUL (What I'd suggest)
+	     * uwsgi --> 
+		 * 
+
+Architecture
+
+ backend - standalone backend as of now, FE -> do it in modern angular/react/vue ?
+ 
